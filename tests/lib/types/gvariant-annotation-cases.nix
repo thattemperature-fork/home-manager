@@ -1,4 +1,6 @@
 # dconf2nix src/Nix.hs emits raw tuple members and dictionary entries under mkTyped.
+# `expected` is a semantic GVariant reference parsed by GLib, not exact output text.
+# Use `text` for an additional exact serialization assertion.
 { gv, dictionaryEntry }:
 with gv;
 [
@@ -65,6 +67,16 @@ with gv;
   {
     value = mkByteString "line\nbreak";
     expected = "[byte 108, 105, 110, 101, 10, 98, 114, 101, 97, 107, 0]";
+  }
+  {
+    # Backslash followed by a literal CR preserves the CR byte.
+    value = mkByteString "\\\r";
+    expected = "[byte 13, 0]";
+  }
+  {
+    # Backslash followed by a literal LF is a line continuation.
+    value = mkByteString "\\\n";
+    expected = "[byte 0]";
   }
   {
     value = mkTyped "ms" null;
