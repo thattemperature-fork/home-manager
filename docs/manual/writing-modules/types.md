@@ -191,6 +191,38 @@ worth describing in more detail. These are the option types `dagOf` and
     provided constructor functions. Examples assume an option `foo.bar`
     of type `hm.types.gvariant`.
 
+    []{#sec-option-types-gvariant-mkTyped}`hm.gvariant.mkTyped type value`
+
+    :   Adds an explicit GVariant type annotation, for example
+        `mkTyped "ms" "hello"` serializes as `@ms 'hello'` and
+        `mkTyped "a{sv}" []` as `@a{sv} []`. Unlike `mkValue`, plain lists
+        (including nested empty lists) do not impose an inferred array type.
+        Tuples and dictionary entries also take their types from this annotation.
+        Explicit annotations and casts inside the value are preserved and must
+        agree with the outer type. This constrains the parser; it does not
+        convert incompatible values. GLib validates type strings and values.
+
+    []{#sec-option-types-gvariant-mkCast}`hm.gvariant.mkCast name value`
+
+    :   Adds a named GVariant cast, for example `mkCast "handle" 22` or
+        `mkCast "boolean" false`. Supported names are `boolean`, `byte`,
+        `int16`, `uint16`, `int32`, `uint32`, `int64`, `uint64`, `handle`,
+        `double`, `string`, `objectpath`, and `signature`. Strings are quoted
+        and escaped, not interpreted as raw GVariant text. Casts may nest.
+        Like `mkTyped`, this is a type constraint, not a conversion.
+
+    []{#sec-option-types-gvariant-mkByteString}`hm.gvariant.mkByteString payload`
+
+    :   Builds a NUL-terminated byte array (type `ay`) using GVariant's
+        `b'…'` syntax. For compatibility with dconf2nix, the payload is an
+        **already escaped GVariant byte-string body**, not an ordinary Nix
+        string to be escaped again. For example, `mkByteString ''a\n\377''`
+        contains an ASCII `a`, a newline, byte 255, and a terminating zero.
+        Use `\\` in an indented Nix string for a literal backslash.
+        Apostrophes are safely quoted; existing escapes are preserved.
+        A trailing unpaired backslash is rejected. Use `mkArray "y"` for
+        arbitrary byte arrays that need not end in zero.
+
     []{#sec-option-types-gvariant-mkBoolean}`hm.gvariant.mkBoolean (v: bool)`
 
     :   Takes a Nix value `v` to a GVariant `boolean` value (GVariant

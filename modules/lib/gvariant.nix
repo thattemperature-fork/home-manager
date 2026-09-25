@@ -15,6 +15,17 @@ let
     replaceStrings
     ;
 
+  # Containers inferred by mkValue must not impose their default types under
+  # an explicit annotation (in particular, [] normally becomes @as []).
+  renderUnannotated =
+    mkValue: v:
+    if builtins.isList v then
+      "[${concatMapStringsSep "," (renderUnannotated mkValue) v}]"
+    else if v ? __unannotatedString then
+      v.__unannotatedString v
+    else
+      toString (mkValue v);
+
   mkPrimitive = t: v: {
     _type = "gvariant";
     type = t;
@@ -114,6 +125,78 @@ rec {
 
   mkEmptyArray = elemType: mkArray elemType [ ];
 
+  # dconf2nix supplies an already byte-escaped payload, not a Nix byte string.
+  mkByteString =
+    value:
+    let
+      escaped =
+        builtins.foldl'
+          (
+            state: char:
+            if state.backslash then
+              {
+                text = state.text + char;
+                backslash = false;
+              }
+            else if char == "\\" then
+              {
+                text = state.text + char;
+                backslash = true;
+              }
+            else
+              {
+                text = state.text + (if char == "'" then "\\'" else char);
+                backslash = false;
+              }
+          )
+          {
+            text = "";
+            backslash = false;
+          }
+          (lib.stringToCharacters value);
+    in
+    mkPrimitive "ay" value
+    // {
+      __toString =
+        _:
+        if escaped.backslash then
+          throw "GVariant byte string ends with an incomplete escape"
+        else
+          "b'${escaped.text}'";
+    };
+
+  mkTyped =
+    annotation: value:
+    mkPrimitive annotation value
+    // {
+      __toString = self: "@${self.type} ${renderUnannotated mkValue self.value}";
+    };
+
+  # A cast constrains the textual value; it is not a conversion.
+  mkCast =
+    name: value:
+    let
+      castTypes = {
+        boolean = "b";
+        byte = "y";
+        int16 = "n";
+        uint16 = "q";
+        int32 = "i";
+        uint32 = "u";
+        int64 = "x";
+        uint64 = "t";
+        handle = "h";
+        double = "d";
+        string = "s";
+        objectpath = "o";
+        signature = "g";
+      };
+    in
+    mkPrimitive (castTypes.${name} or (throw "Unknown GVariant cast: ${name}")) value
+    // {
+      __toString = self: "${name} ${toString (mkValue self.value)}";
+    };
+
   mkVariant =
     elem:
     let
@@ -133,6 +216,7 @@ rec {
     mkPrimitive dictionaryType gvarElems
     // {
       __toString = self: "@${self.type} {${concatMapStringsSep "," toString self.value}}";
+      __unannotatedString = _: "{${concatMapStringsSep "," (renderUnannotated mkValue) elems}}";
     };
 
   mkNothing = elemType: mkMaybe elemType null;
@@ -152,7 +236,16 @@ rec {
     in
     mkPrimitive tupleType gvarElems
     // {
-      __toString = self: "@${self.type} (${concatMapStringsSep "," toString self.value})";
+      __toString =
+        self:
+        "@${self.type} (${concatMapStringsSep "," toString self.value}${
+          lib.optionalString (builtins.length self.value == 1) ","
+        })";
+      __unannotatedString =
+        _:
+        "(${concatMapStringsSep "," (renderUnannotated mkValue) elems}${
+          lib.optionalString (builtins.length elems == 1) ","
+        })";
     };
 
   mkBoolean =
