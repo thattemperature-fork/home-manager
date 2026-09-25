@@ -198,9 +198,10 @@ worth describing in more detail. These are the option types `dagOf` and
         `mkTyped "a{sv}" []` as `@a{sv} []`. Unlike `mkValue`, plain lists
         (including nested empty lists) do not impose an inferred array type.
         Tuples and dictionary entries also take their types from this annotation.
-        Explicit annotations and casts inside the value are preserved and must
-        agree with the outer type. This constrains the parser; it does not
-        convert incompatible values. GLib validates type strings and values.
+        Explicit scalar constructors, annotations, and casts inside the value
+        are preserved. GLib validates the resulting text; outer types take
+        precedence over nested annotations when the literal is compatible.
+        `null` represents `nothing` under a maybe annotation.
 
     []{#sec-option-types-gvariant-mkCast}`hm.gvariant.mkCast name value`
 

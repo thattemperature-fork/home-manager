@@ -19,6 +19,20 @@ let
   };
   cases = {
     testBytes = check (gv.mkByteString "a'\"\\n\\377\\\\end") "b'a\\'\"\\n\\377\\\\end'" "ay";
+    testTypedNothing = check (gv.mkTyped "ms" null) "@ms nothing" "ms";
+    testTypedExplicitInt = check (gv.mkTyped "i" (gv.mkInt32 1)) "@i @i 1" "i";
+    testTypedNestedInferred = check (gv.mkTyped "(ua{su}au)" (
+      gv.mkTuple [
+        1
+        [
+          (gv.mkDictionaryEntry [
+            "key"
+            2
+          ])
+        ]
+        [ ]
+      ]
+    )) "@(ua{su}au) (1,[{'key',2}],[])" "(ua{su}au)";
     testBytesEmpty = check (gv.mkByteString "") "b''" "ay";
     testTypedTupleArray = check (gv.mkTyped "(au)" (gv.mkTuple [ [ 1 ] ])) "@(au) ([1],)" "(au)";
     testSingleton = check (gv.mkTuple [ 1 ]) "@(i) (1,)" "(i)";
@@ -61,6 +75,10 @@ else
     // {
       testIncompleteByteEscape = {
         expr = (builtins.tryEval (toString (gv.mkByteString "\\"))).success;
+        expected = false;
+      };
+      testUnknownCastText = {
+        expr = (builtins.tryEval (toString (gv.mkCast "unknown" 0))).success;
         expected = false;
       };
       testUnknownCast = {

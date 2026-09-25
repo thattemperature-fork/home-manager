@@ -23,8 +23,14 @@ let
       "[${concatMapStringsSep "," (renderUnannotated mkValue) v}]"
     else if v ? __unannotatedString then
       v.__unannotatedString v
+    else if v == null then
+      "nothing"
+    else if builtins.isAttrs v && v._type or "" == "gvariant" then
+      v.__annotatedString or (toString v)
+    else if builtins.isBool v || builtins.isString v || builtins.isInt v || builtins.isFloat v then
+      toString (mkValue v)
     else
-      toString (mkValue v);
+      throw "lib.gvariant: cannot serialize ${builtins.typeOf v} as an annotated value.";
 
   mkPrimitive = t: v: {
     _type = "gvariant";
@@ -194,7 +200,7 @@ rec {
     in
     mkPrimitive (castTypes.${name} or (throw "Unknown GVariant cast: ${name}")) value
     // {
-      __toString = self: "${name} ${toString (mkValue self.value)}";
+      __toString = self: builtins.seq self.type "${name} ${renderUnannotated mkValue self.value}";
     };
 
   mkVariant =
@@ -252,6 +258,7 @@ rec {
     v:
     mkPrimitive type.boolean v
     // {
+      __annotatedString = "@b ${if v then "true" else "false"}";
       __toString = self: if self.value then "true" else "false";
     };
 
@@ -262,6 +269,7 @@ rec {
     in
     mkPrimitive type.string v
     // {
+      __annotatedString = "@s '${sanitize v}'";
       __toString = self: "'${sanitize self.value}'";
     };
 
@@ -282,6 +290,7 @@ rec {
     v:
     mkPrimitive type.int32 v
     // {
+      __annotatedString = "@i ${toString v}";
       __toString = self: toString self.value;
     };
 
@@ -295,6 +304,7 @@ rec {
     v:
     mkPrimitive type.double v
     // {
+      __annotatedString = "@d ${toString v}";
       __toString = self: toString self.value;
     };
 
