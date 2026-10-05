@@ -116,10 +116,44 @@ rec {
           + " ${showFiles (getFiles defs)}."
         )
       else if gvar.isArray sharedDefType && allChecked then
-        gvar.mkValue ((types.listOf gvariant).merge loc (map (d: d // { inherit (d.value) value; }) vdefs))
-        // {
-          type = sharedDefType;
-        }
+        # Byte strings are opaque arrays: concatenating escaped source text
+        # would discard each value's terminating NUL (and mishandle escapes).
+        # Keep a single definition intact and reject multiple definitions,
+        # including mixtures with ordinary byte arrays, via mergeOneOption.
+        if lib.any (v: v.__arrayElements or null == null) vals then
+          mergeOneOption loc vdefs
+        else if all (v: !(v.__isTyped or false)) vals then
+          # Preserve the established constructor-valued .value representation
+          # for ordinary arrays; only explicit annotations need raw elements.
+          gvar.mkArray (lib.removePrefix "a" sharedDefType) (
+            (types.listOf gvariant).merge loc (map (d: d // { value = d.value.value; }) vdefs)
+          )
+        else
+          let
+            # Resolve element properties through the module system, but retain
+            # raw values: inferring each element's GVariant type independently
+            # loses the outer annotation's context for null and containers.
+            elementType = mkOptionType {
+              name = "gvariantArrayElement";
+              description = "GVariant array element";
+              check = _: true;
+              merge =
+                elementLoc: elementDefs:
+                if all (d: builtins.isList d.value) elementDefs then
+                  (types.listOf elementType).merge elementLoc elementDefs
+                else if builtins.length elementDefs == 1 then
+                  (head elementDefs).value
+                else if all (d: d.value == null) elementDefs then
+                  null
+                else
+                  # Multiple non-list definitions still use the established
+                  # GVariant conflict and scalar merge policies.
+                  gvariant.merge elementLoc elementDefs;
+            };
+          in
+          gvar.mkTyped sharedDefType (
+            (types.listOf elementType).merge loc (map (d: d // { value = d.value.__arrayElements; }) vdefs)
+          )
       else if gvar.isTuple sharedDefType && allChecked then
         mergeOneOption loc defs
       else if gvar.isMaybe sharedDefType && allChecked then

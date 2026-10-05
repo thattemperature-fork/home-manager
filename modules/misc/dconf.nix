@@ -91,6 +91,13 @@ in
           (`i`), it would get stored in the database as such, and GSettings
           might be confused when loading the setting.
 
+          Array definitions are concatenated in module order, including explicitly
+          typed arrays. Byte strings are treated as indivisible values to preserve
+          their terminating NUL byte: only one definition is allowed for a byte
+          string key, even if repeated definitions are identical. Use an explicit
+          byte array to concatenate bytes across definitions, or `lib.mkForce` to
+          select one byte string definition.
+
           You might want to use [dconf2nix](https://github.com/gvolpe/dconf2nix)
           to convert dconf database dumps into compatible Nix expression.
         '';

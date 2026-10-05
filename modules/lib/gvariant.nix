@@ -15,6 +15,23 @@ let
     replaceStrings
     ;
 
+  # Containers inferred by mkValue must not impose their default types under
+  # an explicit annotation (in particular, [] normally becomes @as []).
+  renderUnannotated =
+    mkValue: v:
+    if builtins.isList v then
+      "[${concatMapStringsSep "," (renderUnannotated mkValue) v}]"
+    else if v ? __unannotatedString then
+      v.__unannotatedString v
+    else if v == null then
+      "nothing"
+    else if builtins.isAttrs v && v._type or "" == "gvariant" then
+      v.__annotatedString or (toString v)
+    else if builtins.isBool v || builtins.isString v || builtins.isInt v || builtins.isFloat v then
+      toString (mkValue v)
+    else
+      throw "lib.gvariant: cannot serialize ${builtins.typeOf v} as an annotated value.";
+
   mkPrimitive = t: v: {
     _type = "gvariant";
     type = t;
@@ -109,10 +126,78 @@ rec {
     elemType: elems:
     mkPrimitive (type.arrayOf elemType) (map mkValue elems)
     // {
+      __arrayElements = elems;
       __toString = self: "@${self.type} [${concatMapStringsSep "," toString self.value}]";
     };
 
   mkEmptyArray = elemType: mkArray elemType [ ];
+
+  # dconf2nix supplies an already byte-escaped payload, not a Nix byte string.
+  mkByteString =
+    value:
+    let
+      escaped = concatStrings (
+        map (
+          part:
+          if builtins.isList part then
+            let
+              escapedPart = head part;
+              octal = builtins.match "\\\\([0-7]{1,3})\\\\\n" escapedPart;
+            in
+            if octal != null then
+              # Pad before removing LF so following digits cannot extend the
+              # escape: \\1 followed by a continuation and 7 is not \\17.
+              "\\${lib.fixedWidthString 3 "0" (head octal)}"
+            else if escapedPart == "\\\n" then
+              ""
+            else
+              escapedPart
+          else if lib.hasInfix "\\" part then
+            throw "GVariant byte string ends with an incomplete escape"
+          else
+            replaceStrings [ "'" "\n" ] [ "\\'" "\\n" ] part
+        ) (builtins.split "(\\\\[0-7]{1,3}\\\\\n|\\\\(.|\n))" value)
+      );
+    in
+    mkPrimitive "ay" value
+    // {
+      # builtins.split discards context; retain dependencies of the payload.
+      __toString = _: builtins.appendContext "b'${escaped}'" (builtins.getContext value);
+    };
+
+  mkTyped =
+    annotation: value:
+    mkPrimitive annotation value
+    // {
+      __isTyped = true;
+      __arrayElements = if builtins.isList value then value else value.__arrayElements or null;
+      __toString = self: "@${self.type} ${renderUnannotated mkValue self.value}";
+    };
+
+  # A cast constrains the textual value; it is not a conversion.
+  mkCast =
+    name: value:
+    let
+      castTypes = {
+        boolean = "b";
+        byte = "y";
+        int16 = "n";
+        uint16 = "q";
+        int32 = "i";
+        uint32 = "u";
+        int64 = "x";
+        uint64 = "t";
+        handle = "h";
+        double = "d";
+        string = "s";
+        objectpath = "o";
+        signature = "g";
+      };
+    in
+    mkPrimitive (castTypes.${name} or (throw "Unknown GVariant cast: ${name}")) value
+    // {
+      __toString = self: builtins.seq self.type "${name} ${renderUnannotated mkValue self.value}";
+    };
 
   mkVariant =
     elem:
@@ -133,6 +218,7 @@ rec {
     mkPrimitive dictionaryType gvarElems
     // {
       __toString = self: "@${self.type} {${concatMapStringsSep "," toString self.value}}";
+      __unannotatedString = _: "{${concatMapStringsSep "," (renderUnannotated mkValue) elems}}";
     };
 
   mkNothing = elemType: mkMaybe elemType null;
@@ -152,13 +238,23 @@ rec {
     in
     mkPrimitive tupleType gvarElems
     // {
-      __toString = self: "@${self.type} (${concatMapStringsSep "," toString self.value})";
+      __toString =
+        self:
+        "@${self.type} (${concatMapStringsSep "," toString self.value}${
+          lib.optionalString (builtins.length self.value == 1) ","
+        })";
+      __unannotatedString =
+        _:
+        "(${concatMapStringsSep "," (renderUnannotated mkValue) elems}${
+          lib.optionalString (builtins.length elems == 1) ","
+        })";
     };
 
   mkBoolean =
     v:
     mkPrimitive type.boolean v
     // {
+      __annotatedString = "@b ${if v then "true" else "false"}";
       __toString = self: if self.value then "true" else "false";
     };
 
@@ -169,6 +265,7 @@ rec {
     in
     mkPrimitive type.string v
     // {
+      __annotatedString = "@s '${sanitize v}'";
       __toString = self: "'${sanitize self.value}'";
     };
 
@@ -189,6 +286,7 @@ rec {
     v:
     mkPrimitive type.int32 v
     // {
+      __annotatedString = "@i ${toString v}";
       __toString = self: toString self.value;
     };
 
@@ -202,6 +300,7 @@ rec {
     v:
     mkPrimitive type.double v
     // {
+      __annotatedString = "@d ${toString v}";
       __toString = self: toString self.value;
     };
 
